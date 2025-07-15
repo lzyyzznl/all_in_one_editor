@@ -275,56 +275,10 @@
 						@file-modified="handleFileModified"
 						@file-saved="handleFileSaved"
 						@save-as-requested="handleSaveAsRequested"
-						@update:stats="handleStatsUpdate"
 						@open-file-requested="handleOpenFileRequested"
 						@new-tab-requested="handleNewTabRequested"
 						@clear-cache-requested="handleClearCacheRequested"
 					/>
-				</div>
-			</div>
-		</div>
-
-		<!-- 状态栏 -->
-		<div
-			class="h-12 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between px-6 text-sm flex-shrink-0 shadow-sm backdrop-blur-sm"
-		>
-			<!-- 左侧信息 -->
-			<div>
-				<span v-if="openTabs.length > 0"
-					>已打开 {{ openTabs.length }} 个文件</span
-				>
-				<span v-else>未打开任何文件</span>
-			</div>
-
-			<!-- 右侧编辑器统计信息 -->
-			<div class="flex items-center gap-3">
-				<div
-					v-if="editorStats.characterCount > 0"
-					class="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-orange-100 to-red-100 dark:from-orange-900/30 dark:to-red-900/30 text-orange-700 dark:text-orange-300 rounded-lg text-xs font-medium border border-orange-200 dark:border-orange-800"
-				>
-					<Icon icon="material-symbols:edit" class="w-4 h-4" />
-					{{ editorStats.characterCount }} 字符
-				</div>
-				<div
-					v-if="editorStats.fileSize > 0"
-					class="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-purple-100 to-violet-100 dark:from-purple-900/30 dark:to-violet-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-xs font-medium border border-purple-200 dark:border-purple-800"
-				>
-					<Icon icon="material-symbols:description" class="w-4 h-4" />
-					{{ formatFileSize(editorStats.fileSize) }}
-				</div>
-				<div
-					v-if="editorStats.lineCount > 0"
-					class="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-900/30 dark:to-cyan-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-medium border border-blue-200 dark:border-blue-800"
-				>
-					<Icon icon="material-symbols:format-list-bulleted" class="w-4 h-4" />
-					{{ editorStats.lineCount }} 行
-				</div>
-				<div
-					v-if="openTabs.length > 0"
-					class="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-medium border border-indigo-200 dark:border-indigo-800"
-				>
-					<Icon icon="material-symbols:tab" class="w-4 h-4" />
-					{{ openTabs.length }} 页签
 				</div>
 			</div>
 		</div>
@@ -652,31 +606,6 @@ const isCollapsed = ref(false);
 
 // 计算属性
 const apiSupported = computed(() => isFileSystemAccessSupported());
-
-// 编辑器统计信息
-const editorStats = ref({
-	characterCount: 0,
-	fileSize: 0,
-	lineCount: 0,
-});
-
-// 处理编辑器统计数据更新
-const handleStatsUpdate = (stats: {
-	characterCount: number;
-	fileSize: number;
-	lineCount: number;
-}) => {
-	editorStats.value = stats;
-};
-
-// 格式化文件大小
-const formatFileSize = (bytes: number): string => {
-	if (bytes === 0) return "0 B";
-	const k = 1024;
-	const sizes = ["B", "KB", "MB", "GB"];
-	const i = Math.floor(Math.log(bytes) / Math.log(k));
-	return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-};
 
 // 页签持久化相关
 const TAB_DB_NAME = "file-browser-tabs-db";

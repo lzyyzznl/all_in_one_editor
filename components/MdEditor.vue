@@ -356,23 +356,23 @@
 										: ''
 								"
 								size="default"
-								title="富文本"
+								title="富文本模式"
 								class="!rounded-md !shadow-sm transition-all duration-200 !w-9 !h-9 !p-0"
 							>
-								<Icon icon="material-symbols:edit" class="text-lg" />
+								<Icon icon="material-symbols:palette" class="text-lg" />
 							</el-button>
 							<el-button
-								@click="toggleEditorMode('markdown')"
+								@click="toggleEditorMode('split')"
 								:class="
-									editorMode === 'markdown'
+									editorMode === 'split'
 										? '!bg-blue-600 !text-white !border-blue-600'
 										: ''
 								"
 								size="default"
-								title="源码"
+								title="分屏模式"
 								class="!rounded-md !shadow-sm transition-all duration-200 !w-9 !h-9 !p-0"
 							>
-								<Icon icon="material-symbols:code" class="text-lg" />
+								<Icon icon="material-symbols:view-column" class="text-lg" />
 							</el-button>
 						</div>
 
@@ -462,7 +462,178 @@
 
 			<!-- 编辑器内容区域 -->
 			<div v-else class="flex-1 flex flex-col relative">
-				<!-- 右侧目录面板已被移动到编辑器内容区域内 -->
+				<!-- 目录弹窗 - 移到最外层，确保在所有模式下都能显示 -->
+				<transition
+					enter-active-class="transition-opacity duration-300 ease-out"
+					leave-active-class="transition-opacity duration-300 ease-out"
+					enter-from-class="opacity-0"
+					leave-to-class="opacity-0"
+				>
+					<div
+						v-if="showToc"
+						ref="tocPanel"
+						class="absolute right-0 inset-y-0 w-72 bg-white/95 dark:bg-slate-900/95 border-l border-slate-200 dark:border-slate-700 shadow-2xl z-50 p-6 overflow-y-auto flex flex-col animate-in slide-in-from-right-5 duration-300"
+					>
+						<h3
+							class="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100 flex items-center gap-2"
+						>
+							📑 文档大纲
+						</h3>
+						<div v-if="tocItems.length > 0" class="space-y-1">
+							<div
+								v-for="item in tocItems"
+								:key="item.id"
+								class="pl-2 border-l-2 border-slate-200 dark:border-slate-700 ml-1"
+							>
+								<a
+									class="block py-1 px-2 rounded hover:bg-blue-100 dark:hover:bg-blue-900 cursor-pointer text-slate-700 dark:text-slate-200 text-sm"
+									:class="{
+										'ml-0': item.level === 1,
+										'ml-3': item.level === 2,
+										'ml-6': item.level === 3,
+										'ml-9': item.level === 4,
+										'ml-12': item.level === 5,
+										'ml-15': item.level === 6,
+									}"
+									@click="jumpToHeading(item.id)"
+								>
+									{{ item.text }}
+								</a>
+							</div>
+						</div>
+						<div
+							v-else
+							class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 text-sm py-8"
+						>
+							<Icon
+								icon="material-symbols:article-outline"
+								class="text-4xl mb-2 opacity-50"
+							/>
+							<p class="text-center">暂无标题</p>
+							<p class="text-center text-xs mt-1">
+								在文档中添加标题后，大纲将在此显示
+							</p>
+						</div>
+					</div>
+				</transition>
+
+				<!-- 查找弹窗 - 移到最外层，确保在所有模式下都能显示 -->
+				<transition
+					enter-active-class="transition-opacity duration-300 ease-out"
+					leave-active-class="transition-opacity duration-300 ease-out"
+					enter-from-class="opacity-0"
+					leave-to-class="opacity-0"
+				>
+					<div
+						v-if="showSearchDialog"
+						ref="searchPanel"
+						class="absolute right-0 top-8 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 z-50 backdrop-blur-sm animate-in slide-in-from-right-5 slide-in-from-top-2 duration-300"
+					>
+						<!-- 关闭按钮 - 右上角绝对定位 -->
+						<el-button
+							@click="showSearchDialog = false"
+							size="small"
+							title="关闭"
+							class="!absolute !top-3 !right-3 !p-1.5 !w-6 !h-6 !rounded-md !bg-slate-100 dark:!bg-slate-600 !border-slate-200 dark:!border-slate-500 !text-slate-600 dark:!text-slate-400 hover:!bg-slate-200 dark:hover:!bg-slate-500 !shadow-sm transition-all duration-200 !z-10"
+						>
+							<Icon icon="material-symbols:close" class="text-xs" />
+						</el-button>
+
+						<!-- 搜索内容区域 -->
+						<div class="p-6">
+							<h3
+								class="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100 flex items-center gap-2"
+							>
+								🔍 查找和替换
+							</h3>
+
+							<!-- 搜索输入框 -->
+							<div class="space-y-3">
+								<el-input
+									v-model="searchTerm"
+									placeholder="输入搜索内容..."
+									class="search-input"
+									@input="onSearchInput"
+									@keydown.enter="findNext"
+								>
+									<template #prefix>
+										<Icon icon="material-symbols:search" />
+									</template>
+								</el-input>
+
+								<!-- 替换输入框 -->
+								<el-input
+									v-model="replaceTerm"
+									placeholder="输入替换内容..."
+									@keydown.enter="replaceOne"
+								>
+									<template #prefix>
+										<Icon icon="material-symbols:find-replace" />
+									</template>
+								</el-input>
+
+								<!-- 搜索选项 -->
+								<div class="flex flex-wrap gap-2 text-sm">
+									<el-checkbox v-model="caseSensitive" size="small">
+										区分大小写
+									</el-checkbox>
+									<el-checkbox v-model="regexEnabled" size="small">
+										正则表达式
+									</el-checkbox>
+								</div>
+
+								<!-- 搜索结果统计 -->
+								<div
+									v-if="searchTerm && searchResults.total > 0"
+									class="text-sm text-slate-600 dark:text-slate-400"
+								>
+									{{ searchResults.current }}/{{ searchResults.total }} 个结果
+								</div>
+
+								<!-- 操作按钮 -->
+								<div class="flex gap-2">
+									<el-button
+										@click="findPrev"
+										size="small"
+										:disabled="!searchTerm || searchResults.total === 0"
+										title="上一个 (Shift+Enter)"
+									>
+										<Icon icon="material-symbols:keyboard-arrow-up" />
+									</el-button>
+									<el-button
+										@click="findNext"
+										size="small"
+										:disabled="!searchTerm || searchResults.total === 0"
+										title="下一个 (Enter)"
+									>
+										<Icon icon="material-symbols:keyboard-arrow-down" />
+									</el-button>
+									<el-button
+										@click="replaceOne"
+										size="small"
+										:disabled="
+											!searchTerm || !replaceTerm || searchResults.total === 0
+										"
+										title="替换"
+									>
+										替换
+									</el-button>
+									<el-button
+										@click="replaceAll"
+										size="small"
+										:disabled="
+											!searchTerm || !replaceTerm || searchResults.total === 0
+										"
+										title="全部替换"
+									>
+										全部替换
+									</el-button>
+								</div>
+							</div>
+						</div>
+					</div>
+				</transition>
+
 				<!-- 编辑器主内容区 -->
 				<div class="flex-1 flex flex-col">
 					<!-- 编辑器内容区 -->
@@ -475,19 +646,26 @@
 							<div
 								class="flex-1 bg-white dark:bg-slate-800 rounded-2xl border-2 border-slate-200 dark:border-slate-700 shadow-xl relative min-h-0"
 							>
+								<!-- 使用Tiptap的内置Markdown支持 -->
+								<EditorContent
+									:editor="editor"
+									class="absolute inset-0 p-8 overflow-y-auto"
+								/>
 								<!-- 气泡菜单 -->
 								<bubble-menu
 									v-if="editor"
 									:editor="editor"
 									:tippy-options="{ duration: 100 }"
-									class="bubble-menu bg-white dark:bg-gray-800 border rounded-lg shadow-lg p-2 flex space-x-1"
+									class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg p-2 flex gap-1"
 								>
 									<button
 										@click="editor?.chain().focus().toggleBold().run()"
 										:class="{
 											'bg-blue-500 text-white': editor?.isActive('bold'),
+											'hover:bg-slate-200 dark:hover:bg-slate-700':
+												!editor?.isActive('bold'),
 										}"
-										class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center"
+										class="px-2 py-1 rounded flex items-center justify-center transition-colors duration-200"
 										title="粗体"
 									>
 										<Icon icon="material-symbols:format-bold" class="text-sm" />
@@ -496,8 +674,10 @@
 										@click="editor?.chain().focus().toggleItalic().run()"
 										:class="{
 											'bg-blue-500 text-white': editor?.isActive('italic'),
+											'hover:bg-slate-200 dark:hover:bg-slate-700':
+												!editor?.isActive('italic'),
 										}"
-										class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center"
+										class="px-2 py-1 rounded flex items-center justify-center transition-colors duration-200"
 										title="斜体"
 									>
 										<Icon
@@ -509,8 +689,10 @@
 										@click="editor?.chain().focus().toggleStrike().run()"
 										:class="{
 											'bg-blue-500 text-white': editor?.isActive('strike'),
+											'hover:bg-slate-200 dark:hover:bg-slate-700':
+												!editor?.isActive('strike'),
 										}"
-										class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center"
+										class="px-2 py-1 rounded flex items-center justify-center transition-colors duration-200"
 										title="删除线"
 									>
 										<Icon
@@ -522,8 +704,10 @@
 										@click="editor?.chain().focus().toggleUnderline().run()"
 										:class="{
 											'bg-blue-500 text-white': editor?.isActive('underline'),
+											'hover:bg-slate-200 dark:hover:bg-slate-700':
+												!editor?.isActive('underline'),
 										}"
-										class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center"
+										class="px-2 py-1 rounded flex items-center justify-center transition-colors duration-200"
 										title="下划线"
 									>
 										<Icon
@@ -537,192 +721,50 @@
 									:editor="editor"
 									class="absolute inset-0 p-8 overflow-y-auto"
 								/>
-
-								<!-- 目录弹窗，与EditorContent同级，确保高度一致 -->
-								<transition name="fade">
-									<div
-										v-if="showToc"
-										ref="tocPanel"
-										class="absolute right-0 inset-y-0 w-72 bg-white/95 dark:bg-slate-900/95 border-l border-slate-200 dark:border-slate-700 shadow-2xl z-50 p-6 overflow-y-auto flex flex-col"
-									>
-										<h3
-											class="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100 flex items-center gap-2"
-										>
-											📑 文档大纲
-										</h3>
-										<div v-if="tocItems.length > 0" class="space-y-1">
-											<div
-												v-for="item in tocItems"
-												:key="item.id"
-												class="pl-2 border-l-2 border-slate-200 dark:border-slate-700 ml-1"
-											>
-												<a
-													class="block py-1 px-2 rounded hover:bg-blue-100 dark:hover:bg-blue-900 cursor-pointer text-slate-700 dark:text-slate-200 text-sm"
-													:style="{
-														marginLeft: `${(item.level - 1) * 12}px`,
-													}"
-													@click="jumpToHeading(item.id)"
-												>
-													{{ item.text }}
-												</a>
-											</div>
-										</div>
-										<div
-											v-else
-											class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 text-sm py-8"
-										>
-											<Icon
-												icon="material-symbols:article-outline"
-												class="text-4xl mb-2 opacity-50"
-											/>
-											<p class="text-center">暂无标题</p>
-											<p class="text-center text-xs mt-1">
-												在文档中添加标题后，大纲将在此显示
-											</p>
-										</div>
-									</div>
-								</transition>
-								<!-- 查找弹窗，与大纲弹窗同级，右侧显示 -->
-								<transition name="fade">
-									<div
-										v-if="showSearchDialog"
-										ref="searchPanel"
-										class="absolute right-0 top-8 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 z-50 backdrop-blur-sm"
-										style="animation: fadeInSlide 0.3s ease-out"
-									>
-										<!-- 关闭按钮 - 右上角绝对定位 -->
-										<el-button
-											@click="showSearchDialog = false"
-											size="small"
-											title="关闭"
-											class="!absolute !top-3 !right-3 !p-1.5 !w-6 !h-6 !rounded-md !bg-slate-100 dark:!bg-slate-600 !border-slate-200 dark:!border-slate-500 !text-slate-600 dark:!text-slate-400 hover:!bg-slate-200 dark:hover:!bg-slate-500 !shadow-sm transition-all duration-200 !z-10"
-										>
-											<Icon icon="material-symbols:close" class="text-xs" />
-										</el-button>
-
-										<!-- 标题和内容区域 -->
-										<div class="p-6">
-											<h3
-												class="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4 pr-8"
-											>
-												查找与替换
-											</h3>
-
-											<div class="space-y-4">
-												<div>
-													<label
-														class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
-														>查找</label
-													>
-													<el-input
-														ref="searchInput"
-														v-model="searchTerm"
-														placeholder="输入查找内容..."
-														@input="onSearchInput"
-														@keydown.enter="findNext"
-														@keydown.shift.enter="findPrev"
-														class="w-full search-input"
-													/>
-												</div>
-												<div>
-													<label
-														class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
-														>替换</label
-													>
-													<el-input
-														v-model="replaceTerm"
-														placeholder="输入替换内容..."
-														@input="onReplaceInput"
-														@keydown.enter="replaceOne"
-														@keydown.shift.enter="replaceAll"
-														class="w-full"
-													/>
-												</div>
-												<div class="flex items-center gap-3">
-													<el-checkbox
-														v-model="regexEnabled"
-														label="正则表达式"
-													/>
-													<el-checkbox
-														v-model="caseSensitive"
-														label="大小写敏感"
-													/>
-													<el-checkbox
-														v-model="wholeWordMatch"
-														label="完全匹配"
-													/>
-												</div>
-												<div class="flex gap-2 pt-2">
-													<el-button
-														size="small"
-														@click="findPrev"
-														class="flex-1"
-														:disabled="searchResults.total === 0"
-														>上一个</el-button
-													>
-													<el-button
-														size="small"
-														@click="findNext"
-														class="flex-1"
-														:disabled="searchResults.total === 0"
-														>下一个</el-button
-													>
-												</div>
-												<div class="flex gap-2">
-													<el-button
-														size="small"
-														@click="replaceOne"
-														class="flex-1"
-														>替换</el-button
-													>
-													<el-button
-														size="small"
-														type="primary"
-														@click="replaceAll"
-														class="flex-1"
-														>全部替换</el-button
-													>
-												</div>
-												<div
-													v-if="searchResults.current && searchResults.total"
-													class="text-xs text-slate-500 dark:text-slate-400 text-center"
-												>
-													{{ searchResults.current }} /
-													{{ searchResults.total }}
-												</div>
-											</div>
-										</div>
-									</div>
-								</transition>
 							</div>
 						</div>
 
-						<!-- Markdown源码编辑模式 -->
+						<!-- 分屏模式 -->
 						<div
-							v-else
-							class="flex-1 flex flex-col p-6 bg-slate-50 dark:bg-slate-900"
+							v-else-if="editorMode === 'split'"
+							class="flex-1 flex gap-4 p-3 bg-slate-50 dark:bg-slate-900"
 						>
-							<el-input
-								v-model="markdownContent"
-								type="textarea"
-								:autosize="false"
-								placeholder="🌱 在这里输入您的 Markdown 内容...您可以使用：# 标题**粗体** *斜体*- 列表[链接](url)```代码块```开始您的创作吧！✨"
-								class="flex-1 font-mono text-sm"
-								resize="none"
-								@input="handleMarkdownInput"
-								:input-style="{
-									height: '100%',
-									padding: '32px',
-									background: 'white',
-									border: '2px solid #e2e8f0',
-									borderRadius: '16px',
-									boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-									fontSize: '14px',
-									fontFamily:
-										'ui-monospace, SFMono-Regular, Consolas, monospace',
-									lineHeight: '1.6',
-								}"
-							/>
+							<!-- 左侧：Markdown源码 -->
+							<div class="flex-1 flex flex-col">
+								<div class="mb-2">
+									<span
+										class="text-sm font-medium text-slate-700 dark:text-slate-300"
+										>Markdown源码</span
+									>
+								</div>
+								<el-input
+									v-model="markdownContent"
+									type="textarea"
+									:autosize="false"
+									placeholder="# 标题&#10;&#10;这里是Markdown源码..."
+									class="flex-1 font-mono text-sm markdown-editor-input"
+									resize="none"
+									@input="handleMarkdownInput"
+								/>
+							</div>
+
+							<!-- 右侧：富文本编辑器 -->
+							<div class="flex-1 flex flex-col">
+								<div class="mb-2">
+									<span
+										class="text-sm font-medium text-slate-700 dark:text-slate-300"
+										>富文本预览</span
+									>
+								</div>
+								<div
+									class="flex-1 bg-white dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-lg relative min-h-0"
+								>
+									<EditorContent
+										:editor="editor"
+										class="absolute inset-0 p-6 overflow-y-auto"
+									/>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -787,10 +829,6 @@ interface Emits {
 	(e: "file-modified", isModified: boolean, modifiedContent?: string): void;
 	(e: "file-saved", fileHandle: FileSystemFileHandle): void;
 	(e: "save-as-requested", content: string): void;
-	(
-		e: "update:stats",
-		stats: { characterCount: number; fileSize: number; lineCount: number }
-	): void;
 	(e: "open-file-requested"): void;
 	(e: "new-tab-requested"): void;
 	(e: "clear-cache-requested"): void;
@@ -814,10 +852,10 @@ const isModified = ref(false);
 
 const originalContent = ref("");
 const markdownContent = ref("");
-const editorMode = ref<"wysiwyg" | "markdown">("wysiwyg");
+const editorMode = ref<"wysiwyg" | "split">("wysiwyg");
 
 // 编辑器配置状态
-const defaultEditorMode = ref<"wysiwyg" | "markdown">("wysiwyg");
+const defaultEditorMode = ref<"wysiwyg" | "split">("wysiwyg");
 const autoSave = ref(false);
 
 // 自动保存定时器
@@ -873,7 +911,7 @@ const editor = useEditor({
 		},
 	},
 	onUpdate: ({ editor }) => {
-		if (editorMode.value === "wysiwyg") {
+		if (editorMode.value === "wysiwyg" || editorMode.value === "split") {
 			if (editor.storage.markdown && editor.storage.markdown.get) {
 				markdownContent.value = editor.storage.markdown.get();
 			} else {
@@ -888,14 +926,13 @@ const editor = useEditor({
 		// 这里不需要额外的逻辑，Vue的响应式系统会处理
 	},
 	onCreate: ({ editor }) => {
-		// 编辑器创建时初始化字符统计
-		updateCharacterCount(editor);
+		// 编辑器创建完成
 	},
 });
 
 // 处理Markdown源码模式下的输入事件
 const handleMarkdownInput = () => {
-	if (editorMode.value === "markdown" && editor.value) {
+	if (editorMode.value === "split" && editor.value) {
 		if (editor.value.storage.markdown && editor.value.storage.markdown.set) {
 			editor.value.storage.markdown.set(markdownContent.value);
 		} else {
@@ -903,40 +940,23 @@ const handleMarkdownInput = () => {
 		}
 
 		checkModified();
-
-		// 延迟更新字符统计
-		setTimeout(() => {
-			if (editor.value) {
-				updateCharacterCount(editor.value);
-			}
-		}, 100);
 	}
 };
 
 // 切换编辑器模式
-const toggleEditorMode = (mode: "wysiwyg" | "markdown") => {
+const toggleEditorMode = (mode: "wysiwyg" | "split") => {
 	if (!editor.value) return;
 
-	if (mode === "markdown" && editorMode.value === "wysiwyg") {
+	if (mode === "split") {
+		// 分屏模式：同步当前内容到markdown
 		if (editor.value.storage.markdown && editor.value.storage.markdown.get) {
 			markdownContent.value = editor.value.storage.markdown.get();
 		} else {
 			markdownContent.value = editor.value.getHTML();
 		}
-	} else if (mode === "wysiwyg" && editorMode.value === "markdown") {
-		if (editor.value.storage.markdown && editor.value.storage.markdown.set) {
-			editor.value.storage.markdown.set(markdownContent.value);
-		} else {
-			editor.value.commands.setContent(markdownContent.value);
-		}
 	}
 
 	editorMode.value = mode;
-
-	// 切换模式后更新字符统计
-	if (editor.value) {
-		updateCharacterCount(editor.value);
-	}
 };
 
 // 加载文件内容到编辑器
@@ -1011,11 +1031,6 @@ const loadFileContent = async () => {
 			editorMode: editorMode.value,
 			isModified: isModified.value,
 		});
-
-		// 初始化字符统计
-		if (editor.value) {
-			updateCharacterCount(editor.value);
-		}
 	} catch (error) {
 		console.error("MdEditor: 加载文件失败", error);
 		ElMessage.error("加载文件失败: " + (error as Error).message);
@@ -1138,66 +1153,10 @@ const searchTerm = ref("");
 const replaceTerm = ref("");
 const regexEnabled = ref(false);
 const caseSensitive = ref(false);
-const wholeWordMatch = ref(false);
 // 搜索结果相关状态
 const searchResults = ref({ current: 0, total: 0 });
 const searchPositions = ref<number[]>([]);
 const currentSearchIndex = ref(-1);
-
-// 字符统计
-const characterCount = ref(0);
-const fileSize = ref(0);
-const lineCount = ref(0);
-
-// 格式化文件大小（保留以备将来使用）
-// const formatFileSize = (bytes: number): string => {
-// 	if (bytes === 0) return "0 B";
-// 	const k = 1024;
-// 	const sizes = ["B", "KB", "MB", "GB"];
-// 	const i = Math.floor(Math.log(bytes) / Math.log(k));
-// 	return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-// };
-
-// 更新字符统计
-const updateCharacterCount = (editorInstance: any) => {
-	try {
-		if (!editorInstance) {
-			console.warn("编辑器实例不存在");
-			return;
-		}
-
-		const text = editorInstance.getText() || "";
-
-		// 更新字符数
-		characterCount.value = text.length;
-
-		// 计算文件大小（字节数）
-		fileSize.value = new Blob([text]).size;
-
-		// 计算行数
-		const lines = text.split("\n");
-		lineCount.value = lines.length;
-
-		// 发送统计数据到父组件
-		emit("update:stats", {
-			characterCount: characterCount.value,
-			fileSize: fileSize.value,
-			lineCount: lineCount.value,
-		});
-
-		console.log("字符统计更新:", {
-			characters: characterCount.value,
-			fileSize: fileSize.value,
-			lines: lineCount.value,
-			text: text.substring(0, 100) + (text.length > 100 ? "..." : ""),
-		});
-	} catch (error) {
-		console.warn("字符统计更新失败:", error);
-		characterCount.value = 0;
-		fileSize.value = 0;
-		lineCount.value = 0;
-	}
-};
 
 // 恢复修改的内容
 const restoreModifiedContent = (content: string, modified: boolean = true) => {
@@ -1220,9 +1179,6 @@ const restoreModifiedContent = (content: string, modified: boolean = true) => {
 	markdownContent.value = content;
 	originalContent.value = content; // 设置原始内容，避免立即触发修改状态
 	isModified.value = modified;
-
-	// 更新字符统计
-	updateCharacterCount(editor.value);
 };
 
 // 插入Mermaid图表
@@ -1274,8 +1230,8 @@ const exportMarkdown = () => {
 	let content = "";
 
 	// 尝试多种方式获取内容
-	if (editorMode.value === "markdown") {
-		// 如果当前是markdown模式，直接使用markdownContent
+	if (editorMode.value === "split") {
+		// 如果当前是分屏模式，直接使用markdownContent
 		content = markdownContent.value;
 	} else if (
 		editor.value.storage.markdown &&
@@ -1483,14 +1439,10 @@ watch(
 			console.log("MdEditor: 文件句柄为空，清空编辑器内容");
 			if (editor.value) {
 				editor.value.commands.setContent("");
-				updateCharacterCount(editor.value);
 			}
 			markdownContent.value = "";
 			originalContent.value = "";
 			isModified.value = false;
-			characterCount.value = 0;
-			fileSize.value = 0;
-			lineCount.value = 0;
 		}
 	}
 );
@@ -1515,14 +1467,10 @@ watch(
 			console.log("MdEditor: 虚拟页签ID变化，清空编辑器内容");
 			if (editor.value) {
 				editor.value.commands.setContent("");
-				updateCharacterCount(editor.value);
 			}
 			markdownContent.value = "";
 			originalContent.value = "";
 			isModified.value = false;
-			characterCount.value = 0;
-			fileSize.value = 0;
-			lineCount.value = 0;
 		}
 	}
 );
@@ -1530,8 +1478,7 @@ watch(
 // 监听编辑器初始化
 watch(editor, (newEditor) => {
 	if (newEditor) {
-		// 编辑器初始化完成后立即更新字符统计
-		updateCharacterCount(newEditor);
+		// 编辑器初始化完成
 	}
 });
 
@@ -1556,11 +1503,6 @@ onMounted(() => {
 		}
 	});
 
-	// 初始化字符统计
-	if (editor.value) {
-		updateCharacterCount(editor.value);
-	}
-
 	// 手动触发fileHandle的初始化逻辑
 	if (props.fileHandle) {
 		loadFileContent();
@@ -1568,22 +1510,11 @@ onMounted(() => {
 		// 没有文件时重置状态
 		if (editor.value) {
 			editor.value.commands.setContent("");
-			updateCharacterCount(editor.value);
 		}
 		markdownContent.value = "";
 		originalContent.value = "";
 		isModified.value = false;
-		characterCount.value = 0;
-		fileSize.value = 0;
-		lineCount.value = 0;
 	}
-
-	// 定期更新字符统计
-	setInterval(() => {
-		if (editor.value) {
-			updateCharacterCount(editor.value);
-		}
-	}, 2000);
 });
 
 // 组件卸载时的清理
@@ -1685,20 +1616,6 @@ const collectSearchPositions = () => {
 						index += searchText.length;
 					}
 				}
-			} else if (wholeWordMatch.value) {
-				// 完全匹配模式
-				const escapedSearchText = searchText.replace(
-					/[.*+?^${}()|[\]\\]/g,
-					"\\$&"
-				);
-				const regex = new RegExp(
-					`\\b${escapedSearchText}\\b`,
-					caseSensitive.value ? "g" : "gi"
-				);
-				let match;
-				while ((match = regex.exec(originalText)) !== null) {
-					positions.push(pos + match.index);
-				}
 			} else {
 				// 普通搜索
 				let index = 0;
@@ -1717,11 +1634,7 @@ const collectSearchPositions = () => {
 	};
 	currentSearchIndex.value = positions.length > 0 ? 0 : -1;
 };
-const onReplaceInput = () => {
-	if (editor.value) {
-		editor.value.commands.setReplaceTerm(replaceTerm.value);
-	}
-};
+
 // 查找下一个/上一个功能
 const findNext = () => {
 	if (!editor.value || searchPositions.value.length === 0) return;
@@ -1782,7 +1695,7 @@ const replaceAll = () => {
 // 移除搜索结果统计功能
 
 // 监听搜索选项变化
-watch([regexEnabled, caseSensitive, wholeWordMatch], () => {
+watch([regexEnabled, caseSensitive], () => {
 	if (searchTerm.value) {
 		onSearchInput();
 	}
@@ -1942,38 +1855,36 @@ watch(showSearchDialog, (visible) => {
 </script>
 
 <style scoped>
-/* 搜索弹窗动画 */
-@keyframes fadeInSlide {
-	0% {
-		opacity: 0;
-		transform: translateX(20px) translateY(-10px);
-	}
-	100% {
-		opacity: 1;
-		transform: translateX(0) translateY(0);
-	}
-}
-
-/* 搜索结果高亮样式 */
+/* 搜索结果高亮样式 - 使用UnoCSS设计理念的颜色值 */
 :deep(.search-result) {
-	background: rgba(255, 255, 0, 0.3);
-	border-radius: 3px;
-	padding: 1px 2px;
+	background: rgba(253, 224, 71, 0.3); /* yellow-300 with 30% opacity */
+	border-radius: 0.25rem; /* rounded-sm */
+	padding: 0.125rem 0.25rem; /* px-0.5 py-px */
 }
 
 :deep(.search-result.current) {
-	background: rgba(255, 165, 0, 0.5);
-	outline: 2px solid #ff6b00;
+	background: rgba(251, 146, 60, 0.5); /* orange-400 with 50% opacity */
+	outline: 2px solid #ea580c; /* outline-2 outline-orange-600 */
 }
 
-/* 淡入淡出过渡动画 */
-.fade-enter-active,
-.fade-leave-active {
-	transition: opacity 0.3s ease;
+/* Markdown编辑器输入框样式 - 使用UnoCSS设计理念 */
+:deep(.markdown-editor-input .el-textarea__inner) {
+	height: 100% !important; /* h-full */
+	padding: 2rem !important; /* p-8 (32px) */
+	background: white !important; /* bg-white */
+	border: 2px solid #e2e8f0 !important; /* border-2 border-slate-200 */
+	border-radius: 1rem !important; /* rounded-2xl (16px) */
+	box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important; /* shadow-2xl */
+	font-size: 0.875rem !important; /* text-sm (14px) */
+	font-family:
+		ui-monospace, SFMono-Regular, Consolas, monospace !important; /* font-mono */
+	line-height: 1.6 !important; /* leading-relaxed */
 }
 
-.fade-enter-from,
-.fade-leave-to {
-	opacity: 0;
+/* 深色模式下的Markdown编辑器样式 */
+:deep(.dark .markdown-editor-input .el-textarea__inner) {
+	background: #1e293b !important; /* dark:bg-slate-800 */
+	border-color: #475569 !important; /* dark:border-slate-600 */
+	color: #f1f5f9 !important; /* dark:text-slate-100 */
 }
 </style>
