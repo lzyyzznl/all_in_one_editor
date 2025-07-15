@@ -1,0 +1,51 @@
+{
+	"name": "markdown-editor",
+	"version": "1.0.0",
+	"description": "独立的Markdown富文本编辑器",
+	"main": "index.js",
+	"scripts": {
+		"dev": "wxt -b chrome",
+		"build": "wxt build",
+		"zip": "wxt zip"
+	},
+	"keywords": [
+		"browser-extension",
+		"markdown",
+		"editor",
+		"tiptap",
+		"vue",
+		"typescript"
+	],
+	"author": "lizeyu",
+	"license": "MIT",
+	"packageManager": "pnpm@10.12.3",
+	"dependencies": {
+		"@element-plus/icons-vue": "^2.3.1",
+		"@iconify/vue": "^5.0.0",
+		"@sereneinserenade/tiptap-search-and-replace": "^0.1.1",
+		"@syfxlin/tiptap-starter-kit": "^1.1.2",
+		"@tiptap/core": "^2.24.2",
+		"@tiptap/extension-bubble-menu": "^2.25.0",
+		"@tiptap/extension-character-count": "^2.25.0",
+		"@tiptap/extension-focus": "^2.25.0",
+		"@tiptap/extension-table-of-contents": "^2.25.0",
+		"@tiptap/extension-text-align": "^2.25.0",
+		"@tiptap/extension-typography": "^2.25.0",
+		"@tiptap/vue-3": "^2.24.2",
+		"element-plus": "^2.9.11",
+		"html2canvas": "^1.4.1",
+		"prettier": "^3.6.2",
+		"tiptap-extension-line-height": "^1.0.0",
+		"vue": "3.5.17",
+		"vuedraggable": "^4.1.0"
+	},
+	"devDependencies": {
+		"@types/chrome": "^0.0.326",
+		"@types/node": "22.15.29",
+		"@wxt-dev/module-vue": "1.0.2",
+		"typescript": "5.8.3",
+		"unocss": "^66.3.2",
+		"vite": "7.0.0",
+		"wxt": "0.20.7"
+	}
+}
