@@ -688,6 +688,8 @@ interface Emits {
 		handle: FileSystemDirectoryHandle,
 		node: FileTreeNode
 	): void;
+	(e: "file-deleted", node: FileTreeNode): void;
+	(e: "file-updated", oldNode: FileTreeNode, newNode: FileTreeNode): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -970,13 +972,6 @@ const loadDirectoryHistory = async () => {
 					rootHandle.value = handle;
 					emit("update:modelValue", handle);
 					await loadFullDirectoryTree();
-					ElMessage({
-						message: `📁 已自动加载${timeText}使用的目录：${
-							directoryInfo.path || directoryInfo.name
-						}`,
-						type: "success",
-						duration: 3000,
-					});
 					return true;
 				} else if (permission === "prompt") {
 					const newPermission = await handle.requestPermission({
@@ -990,13 +985,6 @@ const loadDirectoryHistory = async () => {
 						rootHandle.value = handle;
 						emit("update:modelValue", handle);
 						await loadFullDirectoryTree();
-						ElMessage({
-							message: `📁 已自动加载${timeText}使用的目录：${
-								directoryInfo.path || directoryInfo.name
-							}`,
-							type: "success",
-							duration: 3000,
-						});
 						return true;
 					}
 				}
@@ -1375,6 +1363,17 @@ const renameItem = async () => {
 			}
 
 			await renameFileOrFolder(rootHandle.value, oldName, newName, false);
+
+			// 创建更新后的节点信息
+			const updatedNode: FileTreeNode = {
+				...targetNode,
+				label: newName,
+				id: targetNode.id.replace(oldName, newName), // 更新路径中的文件名
+			};
+
+			// 发射文件更新事件，通知父组件
+			emit("file-updated", targetNode, updatedNode);
+
 			ElMessage.success(`文件重命名成功: ${oldName} → ${newName}`);
 			resetRenameDialog();
 			await loadFullDirectoryTree();
@@ -1429,6 +1428,9 @@ const deleteItem = async (node: FileTreeNode) => {
 		ElMessage.success(
 			`${isDirectory ? "文件夹" : "文件"} "${itemName}" 删除成功`
 		);
+
+		// 发射文件删除事件，通知父组件
+		emit("file-deleted", node);
 
 		// 清除选中状态（如果删除的是当前选中项）
 		if (selectedNodeId.value === node.id) {

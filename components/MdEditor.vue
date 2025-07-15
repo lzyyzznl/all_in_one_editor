@@ -779,6 +779,7 @@ interface Props {
 	fileNode?: FileTreeNode | null;
 	tabCount?: number;
 	isVirtual?: boolean;
+	virtualTabId?: string | null;
 }
 
 // 组件事件接口定义
@@ -792,6 +793,7 @@ interface Emits {
 	): void;
 	(e: "open-file-requested"): void;
 	(e: "new-tab-requested"): void;
+	(e: "clear-cache-requested"): void;
 }
 
 // 组件属性和事件定义
@@ -800,6 +802,7 @@ const props = withDefaults(defineProps<Props>(), {
 	fileNode: null,
 	tabCount: 0,
 	isVirtual: false,
+	virtualTabId: null,
 });
 
 const emit = defineEmits<Emits>();
@@ -1122,6 +1125,10 @@ const reloadFile = async () => {
 		if (!confirmed) return;
 	}
 
+	// 通知父组件清除缓存
+	emit("clear-cache-requested");
+
+	// 强制重新加载文件内容
 	await loadFileContent();
 };
 
@@ -1201,6 +1208,9 @@ const restoreModifiedContent = (content: string, modified: boolean = true) => {
 		isModified: modified,
 	});
 
+	// 设置标志，阻止下次文件句柄变化时重新加载文件
+	shouldLoadFileContent.value = false;
+
 	if (editor.value.storage.markdown && editor.value.storage.markdown.set) {
 		editor.value.storage.markdown.set(content);
 	} else {
@@ -1208,7 +1218,11 @@ const restoreModifiedContent = (content: string, modified: boolean = true) => {
 	}
 
 	markdownContent.value = content;
+	originalContent.value = content; // 设置原始内容，避免立即触发修改状态
 	isModified.value = modified;
+
+	// 更新字符统计
+	updateCharacterCount(editor.value);
 };
 
 // 插入Mermaid图表
@@ -1247,121 +1261,6 @@ const insertDetails = () => {
 // 转换代码块语法（``` ↔ :::）
 const convertCodeBlocks = () => {
 	if (!editor.value) return;
-
-	try {
-		// 获取当前编辑器内容
-		let content = "";
-		if (editor.value.storage.markdown && editor.value.storage.markdown.get) {
-			content = editor.value.storage.markdown.get();
-		} else {
-			content = editor.value.getHTML();
-		}
-
-		if (!content) {
-			ElMessage.warning("编辑器内容为空");
-			return;
-		}
-
-		let hasChanges = false;
-		let newContent = content;
-
-		// 检测并转换 ```mermaid``` 到 :::mermaid:::
-		const mermaidBacktickRegex = /```mermaid\s*\r?\n([\s\S]*?)\r?\n```/g;
-		const mermaidMatches = [...content.matchAll(mermaidBacktickRegex)];
-
-		if (mermaidMatches.length > 0) {
-			for (const match of mermaidMatches) {
-				const mermaidContent = match[1].trim();
-				if (mermaidContent) {
-					const replacement = `:::mermaid\n${mermaidContent}\n:::`;
-					newContent = newContent.replace(match[0], replacement);
-					hasChanges = true;
-				}
-			}
-		}
-
-		// 检测并转换 :::mermaid::: 到 ```mermaid```
-		const mermaidColonRegex = /:::mermaid\s*\r?\n([\s\S]*?)\r?\n:::/g;
-		const mermaidColonMatches = [...content.matchAll(mermaidColonRegex)];
-
-		if (mermaidColonMatches.length > 0) {
-			for (const match of mermaidColonMatches) {
-				const mermaidContent = match[1].trim();
-				if (mermaidContent) {
-					const replacement = `\`\`\`mermaid\n${mermaidContent}\n\`\`\``;
-					newContent = newContent.replace(match[0], replacement);
-					hasChanges = true;
-				}
-			}
-		}
-
-		// 检测并转换 ```plantuml``` 到 :::plantuml:::
-		const plantumlBacktickRegex = /```plantuml\s*\r?\n([\s\S]*?)\r?\n```/g;
-		const plantumlMatches = [...content.matchAll(plantumlBacktickRegex)];
-
-		if (plantumlMatches.length > 0) {
-			for (const match of plantumlMatches) {
-				const plantumlContent = match[1].trim();
-				if (plantumlContent) {
-					const replacement = `:::plantuml\n${plantumlContent}\n:::`;
-					newContent = newContent.replace(match[0], replacement);
-					hasChanges = true;
-				}
-			}
-		}
-
-		// 检测并转换 :::plantuml::: 到 ```plantuml```
-		const plantumlColonRegex = /:::plantuml\s*\r?\n([\s\S]*?)\r?\n:::/g;
-		const plantumlColonMatches = [...content.matchAll(plantumlColonRegex)];
-
-		if (plantumlColonMatches.length > 0) {
-			for (const match of plantumlColonMatches) {
-				const plantumlContent = match[1].trim();
-				if (plantumlContent) {
-					const replacement = `\`\`\`plantuml\n${plantumlContent}\n\`\`\``;
-					newContent = newContent.replace(match[0], replacement);
-					hasChanges = true;
-				}
-			}
-		}
-
-		if (hasChanges) {
-			// 更新编辑器内容
-			if (editor.value.storage.markdown && editor.value.storage.markdown.set) {
-				editor.value.storage.markdown.set(newContent);
-			} else {
-				editor.value.commands.setContent(newContent);
-			}
-
-			const totalConversions =
-				mermaidMatches.length +
-				mermaidColonMatches.length +
-				plantumlMatches.length +
-				plantumlColonMatches.length;
-
-			// 如果转换了内容且文档之前是保存状态，标记为已修改
-			if (totalConversions > 0 && !isModified.value) {
-				isModified.value = true;
-				emit("file-modified", true, newContent);
-				console.log("MdEditor: 代码块转换后标记文档为已修改状态");
-			}
-
-			ElMessage.success(`成功转换 ${totalConversions} 个代码块`);
-			console.log("MdEditor: 代码块转换完成", {
-				mermaidToColon: mermaidMatches.length,
-				mermaidToBacktick: mermaidColonMatches.length,
-				plantumlToColon: plantumlMatches.length,
-				plantumlToBacktick: plantumlColonMatches.length,
-				totalConversions,
-				wasModified: isModified.value,
-			});
-		} else {
-			ElMessage.info("未发现需要转换的代码块");
-		}
-	} catch (error) {
-		console.error("转换代码块失败:", error);
-		ElMessage.error("转换代码块失败: " + (error as Error).message);
-	}
 };
 
 // 工具栏方法实现
@@ -1545,6 +1444,9 @@ const exportImage = async () => {
 	}
 };
 
+// 添加一个标志来控制是否应该加载文件内容
+const shouldLoadFileContent = ref(true);
+
 // 监听文件句柄变化
 watch(
 	() => props.fileHandle,
@@ -1563,13 +1465,54 @@ watch(
 					}
 				: null,
 			hasEditor: !!editor.value,
+			shouldLoadFileContent: shouldLoadFileContent.value,
 		});
 
 		if (newHandle) {
-			console.log("MdEditor: 检测到新文件句柄，开始加载内容");
-			loadFileContent();
+			if (shouldLoadFileContent.value) {
+				console.log("MdEditor: 检测到新文件句柄，开始加载内容");
+				loadFileContent();
+			} else {
+				console.log(
+					"MdEditor: 检测到新文件句柄，但跳过加载（等待恢复缓存内容）"
+				);
+				// 重置标志，下次正常加载
+				shouldLoadFileContent.value = true;
+			}
 		} else {
 			console.log("MdEditor: 文件句柄为空，清空编辑器内容");
+			if (editor.value) {
+				editor.value.commands.setContent("");
+				updateCharacterCount(editor.value);
+			}
+			markdownContent.value = "";
+			originalContent.value = "";
+			isModified.value = false;
+			characterCount.value = 0;
+			fileSize.value = 0;
+			lineCount.value = 0;
+		}
+	}
+);
+
+// 监听虚拟页签ID变化
+watch(
+	() => props.virtualTabId,
+	(newVirtualTabId, oldVirtualTabId) => {
+		console.log("MdEditor: virtualTabId变化监听触发", {
+			newVirtualTabId,
+			oldVirtualTabId,
+			isVirtual: props.isVirtual,
+			hasEditor: !!editor.value,
+		});
+
+		// 只有在虚拟页签模式下才处理virtualTabId变化
+		if (
+			props.isVirtual &&
+			newVirtualTabId &&
+			newVirtualTabId !== oldVirtualTabId
+		) {
+			console.log("MdEditor: 虚拟页签ID变化，清空编辑器内容");
 			if (editor.value) {
 				editor.value.commands.setContent("");
 				updateCharacterCount(editor.value);
@@ -1657,11 +1600,29 @@ onBeforeUnmount(() => {
 	}
 });
 
+// 获取当前编辑器内容
+const getCurrentContent = () => {
+	if (!editor.value) return "";
+
+	if (editor.value.storage.markdown && editor.value.storage.markdown.get) {
+		return editor.value.storage.markdown.get();
+	} else {
+		return markdownContent.value || editor.value.getHTML();
+	}
+};
+
+// 设置是否应该加载文件内容的方法
+const setShouldLoadFileContent = (should: boolean) => {
+	shouldLoadFileContent.value = should;
+};
+
 // 暴露给父组件的方法
 defineExpose({
 	reloadFile,
 	saveFile,
 	restoreModifiedContent,
+	getCurrentContent,
+	setShouldLoadFileContent,
 });
 
 const onSearchInput = () => {
@@ -1981,172 +1942,6 @@ watch(showSearchDialog, (visible) => {
 </script>
 
 <style scoped>
-/* 使用UnoCSS风格的组件样式 */
-:deep(.modern-drawer .el-drawer) {
-	border-radius: 16px 0 0 16px;
-	box-shadow:
-		0 10px 15px -3px rgba(0, 0, 0, 0.1),
-		0 4px 6px -2px rgba(0, 0, 0, 0.05);
-}
-
-:deep(.modern-drawer .el-drawer__header) {
-	background: linear-gradient(to bottom right, #f8fafc, #e2e8f0);
-	border-bottom: 1px solid #e2e8f0;
-	padding: 1.25rem;
-}
-
-:deep(.modern-drawer .el-drawer__title) {
-	font-weight: 600;
-	color: #1e293b;
-}
-
-:deep(.el-input__wrapper) {
-	border-radius: 0.75rem;
-	box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-	transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
-}
-
-:deep(.el-input__wrapper:hover) {
-	box-shadow:
-		0 4px 6px -1px rgba(0, 0, 0, 0.1),
-		0 2px 4px -1px rgba(0, 0, 0, 0.06);
-}
-
-:deep(.el-input__wrapper.is-focus) {
-	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-/* ProseMirror编辑器样式 - UnoCSS设计系统 */
-:deep(.ProseMirror) {
-	outline: none;
-	padding: 2rem;
-	font-family:
-		-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
-		"Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
-	line-height: 1.5;
-	color: #374151; /* text-gray-700 */
-}
-
-/* 标题样式 - 使用UnoCSS的字体大小和颜色系统 */
-:deep(.ProseMirror h1) {
-	font-size: 2.25rem; /* text-4xl */
-	font-weight: 700; /* font-bold */
-	margin: 1.5rem 0 0.75rem 0; /* my-6 mb-3 */
-	color: #111827; /* text-gray-900 */
-}
-
-:deep(.ProseMirror h2) {
-	font-size: 1.875rem; /* text-3xl */
-	font-weight: 600; /* font-semibold */
-	margin: 1.25rem 0 0.5rem 0; /* my-5 mb-2 */
-	color: #111827; /* text-gray-900 */
-}
-
-:deep(.ProseMirror h3) {
-	font-size: 1.5rem; /* text-2xl */
-	font-weight: 600; /* font-semibold */
-	margin: 1rem 0 0.5rem 0; /* my-4 mb-2 */
-	color: #111827; /* text-gray-900 */
-}
-
-/* 段落样式 - UnoCSS设计系统 */
-:deep(.ProseMirror p) {
-	margin: 0.25rem 0; /* my-1 */
-}
-
-/* 列表使用默认样式，不做特殊修改 */
-
-:deep(.ProseMirror blockquote) {
-	border-left: 4px solid #e5e7eb; /* border-l-4 border-gray-200 */
-	padding-left: 0; /* pl-0 - 统一左边距为0 */
-	margin: 0.75rem 0; /* my-3 */
-	font-style: italic; /* italic */
-	color: #6b7280; /* text-gray-500 */
-}
-
-/* 代码样式 - UnoCSS设计系统 */
-:deep(.ProseMirror code) {
-	background: #f3f4f6; /* bg-gray-100 */
-	padding: 0.25rem 0.5rem; /* px-2 py-1 */
-	border-radius: 0.375rem; /* rounded-md */
-	font-family:
-		ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo,
-		monospace; /* font-mono */
-	font-size: 0.875rem; /* text-sm */
-}
-
-:deep(.ProseMirror pre) {
-	background: #1f2937; /* bg-gray-800 */
-	color: #f9fafb; /* text-gray-50 */
-	padding: 1.5rem; /* p-6 */
-	border-radius: 0.75rem; /* rounded-xl */
-	overflow-x: auto; /* overflow-x-auto */
-	margin: 1.5rem 0; /* my-6 */
-}
-
-:deep(.ProseMirror pre code) {
-	background: transparent; /* bg-transparent */
-	padding: 0; /* p-0 */
-	color: inherit;
-}
-
-/* 表格样式 - UnoCSS设计系统 */
-:deep(.ProseMirror table) {
-	border-collapse: collapse;
-	margin: 1.5rem 0; /* my-6 */
-	width: 100%; /* w-full */
-}
-
-:deep(.ProseMirror th, .ProseMirror td) {
-	border: 1px solid #e5e7eb; /* border border-gray-200 */
-	padding: 0.75rem; /* p-3 */
-	text-align: left; /* text-left */
-}
-
-:deep(.ProseMirror th) {
-	background: #f9fafb; /* bg-gray-50 */
-	font-weight: 600; /* font-semibold */
-}
-
-:deep(.ProseMirror hr) {
-	border: none;
-	border-top: 2px solid #e5e7eb; /* border-t-2 border-gray-200 */
-	margin: 2rem 0; /* my-8 */
-}
-
-/* 暗色主题样式 - UnoCSS设计系统 */
-:deep(.dark .ProseMirror) {
-	color: #d1d5db; /* dark:text-gray-300 */
-}
-
-:deep(.dark .ProseMirror h1, .dark .ProseMirror h2, .dark .ProseMirror h3) {
-	color: #f9fafb; /* dark:text-gray-50 */
-}
-
-:deep(.dark .ProseMirror blockquote) {
-	border-left-color: #4b5563; /* dark:border-gray-600 */
-	color: #9ca3af; /* dark:text-gray-400 */
-}
-
-:deep(.dark .ProseMirror code) {
-	background: #374151; /* dark:bg-gray-700 */
-	color: #f3f4f6; /* dark:text-gray-100 */
-}
-
-:deep(.dark .ProseMirror th, .dark .ProseMirror td) {
-	border-color: #4b5563; /* dark:border-gray-600 */
-}
-
-:deep(.dark .ProseMirror th) {
-	background: #374151; /* dark:bg-gray-700 */
-}
-
-:deep(.dark .ProseMirror hr) {
-	border-top-color: #4b5563; /* dark:border-gray-600 */
-}
-
-/* 任务列表使用默认样式，不做特殊修改 */
-
 /* 搜索弹窗动画 */
 @keyframes fadeInSlide {
 	0% {

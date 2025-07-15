@@ -70,6 +70,8 @@
 						v-model="rootDirectoryHandle"
 						@select-file="handleSelectFile"
 						@select-directory="handleSelectDirectory"
+						@file-deleted="handleFileDeleted"
+						@file-updated="handleFileUpdated"
 					/>
 				</div>
 
@@ -269,12 +271,14 @@
 						:file-node="currentFileNode"
 						:tab-count="openTabs.length"
 						:is-virtual="getCurrentTabIsVirtual()"
+						:virtual-tab-id="getCurrentVirtualTabId()"
 						@file-modified="handleFileModified"
 						@file-saved="handleFileSaved"
 						@save-as-requested="handleSaveAsRequested"
 						@update:stats="handleStatsUpdate"
 						@open-file-requested="handleOpenFileRequested"
 						@new-tab-requested="handleNewTabRequested"
+						@clear-cache-requested="handleClearCacheRequested"
 					/>
 				</div>
 			</div>
@@ -555,6 +559,15 @@ const isInitializing = ref(true);
 const fileSize = ref(0);
 const modifiedContent = ref("");
 
+// 文件内容缓存接口
+interface FileCache {
+	content: string; // 当前内容
+	originalContent: string; // 原始文件内容
+	isModified: boolean; // 是否已修改
+	lastModified: number; // 最后修改时间
+	lastAccessed: number; // 最后访问时间
+}
+
 // 页签相关数据
 interface TabItem {
 	id: string;
@@ -574,6 +587,44 @@ const activeTabId = ref<string | null>(null);
 
 // 虚拟标签页计数器
 const virtualTabCounter = ref(1);
+
+// 文件内容缓存
+const fileContentCache = ref<Map<string, FileCache>>(new Map());
+
+// 缓存管理函数
+const getCacheKey = (tab: TabItem): string => {
+	if (tab.isVirtual) {
+		return `virtual:${tab.id}`;
+	} else if (tab.filePath) {
+		return `file:${tab.filePath}`;
+	} else {
+		return `file:${tab.title}`;
+	}
+};
+
+const getCacheContent = (cacheKey: string): FileCache | null => {
+	return fileContentCache.value.get(cacheKey) || null;
+};
+
+const setCacheContent = (cacheKey: string, cache: FileCache): void => {
+	cache.lastAccessed = Date.now();
+	fileContentCache.value.set(cacheKey, cache);
+	console.log("设置缓存内容:", {
+		cacheKey,
+		contentLength: cache.content.length,
+		isModified: cache.isModified,
+	});
+};
+
+const clearCacheContent = (cacheKey: string): void => {
+	fileContentCache.value.delete(cacheKey);
+	console.log("清除缓存内容:", cacheKey);
+};
+
+const clearAllCache = (): void => {
+	fileContentCache.value.clear();
+	console.log("清除所有缓存");
+};
 
 // 另存为对话框相关
 const showSaveAsDialog = ref(false);
@@ -865,42 +916,95 @@ const handleNewTabRequested = () => {
 	createNewTab();
 };
 
+// 处理清除缓存请求
+const handleClearCacheRequested = () => {
+	if (activeTabId.value) {
+		const tab = openTabs.value.find((t) => t.id === activeTabId.value);
+		if (tab) {
+			const cacheKey = getCacheKey(tab);
+			clearCacheContent(cacheKey);
+			console.log("清除当前标签页缓存:", cacheKey);
+		}
+	}
+};
+
 // 切换到指定页签
 const switchToTab = (tabId: string) => {
 	const tab = openTabs.value.find((t) => t.id === tabId);
-	if (tab) {
-		activeTabId.value = tabId;
-		currentFileHandle.value = tab.fileHandle;
-		currentFileNode.value = tab.fileNode;
-		fileModified.value = tab.isModified;
-		console.log("切换到页签:", {
-			tabId,
-			fileHandleName: tab.fileHandle?.name,
-			fileHandleKind: tab.fileHandle?.kind,
-			nodeLabel: tab.fileNode?.label,
-			currentFileHandleSet: !!currentFileHandle.value,
-			hasModifiedContent: !!tab.modifiedContent,
-			isModified: tab.isModified,
-			isVirtual: tab.isVirtual,
+	if (!tab) {
+		console.error("找不到页签:", tabId);
+		return;
+	}
+
+	// 先保存当前页签的内容到缓存
+	if (activeTabId.value && mdEditorRef.value) {
+		const currentTab = openTabs.value.find((t) => t.id === activeTabId.value);
+		if (currentTab) {
+			const currentContent = mdEditorRef.value.getCurrentContent?.() || "";
+			const currentCacheKey = getCacheKey(currentTab);
+
+			// 更新缓存
+			const existingCache = getCacheContent(currentCacheKey);
+			if (existingCache) {
+				existingCache.content = currentContent;
+				existingCache.isModified = currentTab.isModified;
+				existingCache.lastModified = Date.now();
+				setCacheContent(currentCacheKey, existingCache);
+			} else if (currentContent) {
+				// 创建新的缓存条目
+				setCacheContent(currentCacheKey, {
+					content: currentContent,
+					originalContent: currentContent,
+					isModified: currentTab.isModified,
+					lastModified: Date.now(),
+					lastAccessed: Date.now(),
+				});
+			}
+		}
+	}
+
+	// 切换到新页签
+	activeTabId.value = tabId;
+	fileModified.value = tab.isModified;
+	currentFileHandle.value = tab.fileHandle;
+	currentFileNode.value = tab.fileNode;
+
+	console.log("切换到页签:", {
+		tabId,
+		fileHandleName: tab.fileHandle?.name,
+		isVirtual: tab.isVirtual,
+		isModified: tab.isModified,
+	});
+
+	// 第一优先级：从缓存获取内容
+	const cacheKey = getCacheKey(tab);
+	const cachedContent = getCacheContent(cacheKey);
+
+	if (cachedContent) {
+		// 使用缓存内容
+		console.log("从缓存加载内容:", {
+			cacheKey,
+			contentLength: cachedContent.content.length,
+			isModified: cachedContent.isModified,
 		});
 
-		if (tab.isVirtual && tab.virtualContent && mdEditorRef.value) {
-			// 虚拟标签页恢复内容
+		if (mdEditorRef.value) {
+			mdEditorRef.value.setShouldLoadFileContent?.(false);
 			nextTick(() => {
-				if (mdEditorRef.value && tab.virtualContent) {
-					mdEditorRef.value.restoreModifiedContent(tab.virtualContent, true);
-				}
-			});
-		} else if (tab.isModified && tab.modifiedContent && mdEditorRef.value) {
-			// 真实文件标签页恢复内容
-			nextTick(() => {
-				if (mdEditorRef.value && tab.modifiedContent) {
-					mdEditorRef.value.restoreModifiedContent(tab.modifiedContent, true);
+				if (mdEditorRef.value) {
+					mdEditorRef.value.restoreModifiedContent(
+						cachedContent.content,
+						cachedContent.isModified
+					);
 				}
 			});
 		}
 	} else {
-		console.error("找不到页签:", tabId);
+		// 缓存不存在，允许编辑器加载文件内容
+		console.log("缓存不存在，将从文件加载:", cacheKey);
+		if (mdEditorRef.value) {
+			mdEditorRef.value.setShouldLoadFileContent?.(true);
+		}
 	}
 };
 
@@ -936,6 +1040,10 @@ const closeTab = async (tabId: string) => {
 			}
 		}
 	}
+
+	// 清除该标签页的缓存
+	const cacheKey = getCacheKey(tab);
+	clearCacheContent(cacheKey);
 
 	openTabs.value.splice(tabIndex, 1);
 
@@ -1167,6 +1275,100 @@ const handleSelectDirectory = (
 	console.log("选择目录:", node.label);
 };
 
+// 处理文件删除
+const handleFileDeleted = (deletedNode: FileTreeNode) => {
+	console.log("文件被删除:", deletedNode.label);
+
+	// 查找所有与被删除文件相关的标签页
+	const affectedTabs = openTabs.value.filter((tab) => {
+		if (!tab.fileHandle || !tab.fileNode) return false;
+
+		// 检查是否是同一个文件（通过文件路径或节点ID比较）
+		return (
+			tab.filePath === deletedNode.id ||
+			tab.fileNode.id === deletedNode.id ||
+			(tab.fileHandle.name === deletedNode.label &&
+				tab.fileNode.label === deletedNode.label)
+		);
+	});
+
+	// 将受影响的标签页转换为虚拟标签页
+	affectedTabs.forEach((tab) => {
+		console.log("将标签页转换为虚拟标签:", tab.title);
+
+		// 保存当前内容到虚拟内容
+		if (tab.modifiedContent) {
+			tab.virtualContent = tab.modifiedContent;
+		} else if (activeTabId.value === tab.id && mdEditorRef.value) {
+			// 如果是当前活动标签，从编辑器获取内容
+			const currentContent = mdEditorRef.value.getCurrentContent?.() || "";
+			tab.virtualContent = currentContent;
+		}
+
+		// 转换为虚拟标签
+		tab.isVirtual = true;
+		tab.fileHandle = null;
+		tab.fileNode = null;
+		tab.filePath = undefined;
+		tab.modifiedContent = undefined;
+		tab.title = deletedNode.label; // 保持原文件名作为标签名
+
+		// 如果是当前活动标签，更新相关状态
+		if (activeTabId.value === tab.id) {
+			currentFileHandle.value = null;
+			currentFileNode.value = null;
+			// 通知编辑器文件句柄已清空，但保留内容
+			nextTick(() => {
+				if (mdEditorRef.value && tab.virtualContent) {
+					mdEditorRef.value.restoreModifiedContent(tab.virtualContent, true);
+				}
+			});
+		}
+	});
+
+	if (affectedTabs.length > 0) {
+		ElMessage.info(`已将 ${affectedTabs.length} 个相关标签页转换为新建状态`);
+		saveTabsState();
+	}
+};
+
+// 处理文件更新
+const handleFileUpdated = (oldNode: FileTreeNode, newNode: FileTreeNode) => {
+	console.log("文件被更新:", { old: oldNode.label, new: newNode.label });
+
+	// 查找所有与被更新文件相关的标签页
+	const affectedTabs = openTabs.value.filter((tab) => {
+		if (!tab.fileHandle || !tab.fileNode) return false;
+
+		// 检查是否是同一个文件
+		return (
+			tab.filePath === oldNode.id ||
+			tab.fileNode.id === oldNode.id ||
+			(tab.fileHandle.name === oldNode.label &&
+				tab.fileNode.label === oldNode.label)
+		);
+	});
+
+	// 更新受影响的标签页信息
+	affectedTabs.forEach((tab) => {
+		console.log("更新标签页信息:", { old: tab.title, new: newNode.label });
+
+		tab.title = newNode.label;
+		tab.filePath = newNode.id;
+		tab.fileNode = newNode;
+
+		// 如果是当前活动标签，更新相关状态
+		if (activeTabId.value === tab.id) {
+			currentFileNode.value = newNode;
+		}
+	});
+
+	if (affectedTabs.length > 0) {
+		ElMessage.info(`已更新 ${affectedTabs.length} 个标签页的文件信息`);
+		saveTabsState();
+	}
+};
+
 // 处理文件修改状态
 const handleFileModified = async (
 	modified: boolean,
@@ -1182,21 +1384,64 @@ const handleFileModified = async (
 		const tab = openTabs.value.find((t) => t.id === activeTabId.value);
 		if (tab) {
 			tab.isModified = modified;
+
+			// 更新缓存
+			const cacheKey = getCacheKey(tab);
+			const existingCache = getCacheContent(cacheKey);
+
 			if (modified && modifiedContentParam !== undefined) {
+				// 更新缓存内容
+				if (existingCache) {
+					existingCache.content = modifiedContentParam;
+					existingCache.isModified = modified;
+					existingCache.lastModified = Date.now();
+					setCacheContent(cacheKey, existingCache);
+				} else {
+					// 创建新的缓存条目
+					setCacheContent(cacheKey, {
+						content: modifiedContentParam,
+						originalContent: modifiedContentParam,
+						isModified: modified,
+						lastModified: Date.now(),
+						lastAccessed: Date.now(),
+					});
+				}
+
+				// 保持向后兼容
 				if (tab.isVirtual) {
-					// 虚拟标签页保存到virtualContent
 					tab.virtualContent = modifiedContentParam;
 				} else {
-					// 真实文件标签页保存到modifiedContent
 					tab.modifiedContent = modifiedContentParam;
 				}
+
+				console.log("更新缓存和页签修改内容:", {
+					cacheKey,
+					tabId: tab.id,
+					isVirtual: tab.isVirtual,
+					contentLength: modifiedContentParam.length,
+					isModified: modified,
+				});
 			} else if (!modified) {
+				// 文件已保存，更新缓存状态
+				if (existingCache) {
+					existingCache.isModified = false;
+					existingCache.lastModified = Date.now();
+					setCacheContent(cacheKey, existingCache);
+				}
+
+				// 清除旧的内容字段
 				if (tab.isVirtual) {
 					tab.virtualContent = undefined;
 				} else {
 					tab.modifiedContent = undefined;
 				}
 				tab.lastSaveTime = Date.now();
+
+				console.log("清除页签修改状态:", {
+					cacheKey,
+					tabId: tab.id,
+					isVirtual: tab.isVirtual,
+				});
 			}
 			await saveTabsState();
 		}
@@ -1233,6 +1478,13 @@ const getCurrentTabIsVirtual = () => {
 	return tab?.isVirtual || false;
 };
 
+// 获取当前虚拟标签页的ID
+const getCurrentVirtualTabId = () => {
+	if (!activeTabId.value) return null;
+	const tab = openTabs.value.find((t) => t.id === activeTabId.value);
+	return tab?.isVirtual ? tab.id : null;
+};
+
 // 处理另存为请求
 const handleSaveAsRequested = async (content: string) => {
 	if (!rootDirectoryHandle.value) {
@@ -1240,22 +1492,37 @@ const handleSaveAsRequested = async (content: string) => {
 		return;
 	}
 
-	// 显示保存对话框
-	showSaveAsDialog.value = true;
+	// 先设置内容和表单数据
 	saveAsContent.value = content;
 
 	// 设置默认保存目录为根目录
 	saveAsForm.value.targetDirectory = rootDirectoryHandle.value;
 	saveAsForm.value.targetPath = "根目录";
 
-	// 设置默认文件名
+	// 设置默认文件名 - 优先使用当前标签的名称
 	const currentTab = openTabs.value.find((t) => t.id === activeTabId.value);
-	if (currentTab && currentTab.isVirtual) {
-		saveAsForm.value.fileName = currentTab.title.replace(
-			/^新建标签\d+$/,
-			"新建文档"
+
+	if (currentTab) {
+		// 使用标签的标题作为默认文件名，去掉扩展名
+		let fileName = currentTab.title.replace(/\.[^/.]+$/, "");
+
+		// 如果是默认的新建标签名，则使用更友好的名称
+		if (/^新建标签\d+$/.test(fileName)) {
+			fileName = "新建文档";
+		}
+
+		saveAsForm.value.fileName = fileName;
+	} else if (currentFileHandle.value) {
+		saveAsForm.value.fileName = currentFileHandle.value.name.replace(
+			/\.[^/.]+$/,
+			""
 		);
+	} else {
+		saveAsForm.value.fileName = "新建文档";
 	}
+
+	// 最后显示保存对话框，确保所有数据都已设置
+	showSaveAsDialog.value = true;
 };
 
 // 重置另存为对话框
@@ -1364,7 +1631,36 @@ const saveAsFile = async () => {
 			? fileName
 			: `${fileName}.${fileExtension}`;
 
-		// 创建文件
+		// 检查文件是否已存在
+		let fileExists = false;
+		try {
+			await saveAsForm.value.targetDirectory.getFileHandle(fullFileName);
+			fileExists = true;
+		} catch (error) {
+			// 文件不存在，这是正常情况
+			fileExists = false;
+		}
+
+		// 如果文件已存在，询问用户是否覆盖
+		if (fileExists) {
+			try {
+				await ElMessageBox.confirm(
+					`文件 "${fullFileName}" 已存在，是否要覆盖它？`,
+					"文件已存在",
+					{
+						type: "warning",
+						confirmButtonText: "覆盖",
+						cancelButtonText: "取消",
+						distinguishCancelAndClose: true,
+					}
+				);
+			} catch (action) {
+				// 用户取消了操作
+				return;
+			}
+		}
+
+		// 创建或覆盖文件
 		const fileHandle = await saveAsForm.value.targetDirectory.getFileHandle(
 			fullFileName,
 			{
